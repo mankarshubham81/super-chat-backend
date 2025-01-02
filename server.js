@@ -1,9 +1,13 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
+const cors = require("cors")
 require("dotenv").config();
 
 const app = express();
+app.use(cors())
+app.use(express.urlencoded({extended: true}))
+// app.use(express.json());
 const server = http.createServer(app);
 
 const io = new Server(server, {
@@ -11,10 +15,13 @@ const io = new Server(server, {
     origin: process.env.CLIENT_URL, // Allow requests from your frontend URL
     methods: ["GET", "POST"],
   },
+  transports: ['websocket', 'polling']
 });
 
+
+
 io.on("connection", (socket) => {
-  console.log("A user connected:", socket.id);
+  console.log("SERVER A user connected:", socket.id);
 
   socket.on("join-room", (room) => {
     socket.join(room);
