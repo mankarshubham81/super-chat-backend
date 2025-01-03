@@ -5,7 +5,13 @@ const cors = require("cors")
 require("dotenv").config();
 
 const app = express();
-app.use(cors())
+app.use(
+  cors({
+    origin: process.env.CLIENT_URL, // Ensure this is the correct frontend URL
+    methods: ["GET", "POST"],
+    credentials: true,
+  })
+);
 app.use(express.urlencoded({extended: true}))
 // app.use(express.json());
 const server = http.createServer(app);
@@ -35,6 +41,10 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     console.log("A user disconnected:", socket.id);
   });
+});
+
+app.get("/", (req, res) => {
+  res.send("Server is running");
 });
 
 const PORT = process.env.PORT || 3001;
