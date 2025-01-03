@@ -23,8 +23,9 @@ const io = new Server(server, {
   transports: ["websocket", "polling"],
 });
 
-const users = {};
-const rooms = {};
+const users = {}; // Store users by socket ID
+const rooms = {}; // Store users in each room
+const typingStatus = {}; // Store typing users by room
 
 io.on("connection", (socket) => {
   console.log("A user connected:", socket.id);
@@ -36,9 +37,12 @@ io.on("connection", (socket) => {
     rooms[room].push({ id: socket.id, userName });
 
     socket.join(room);
-
     io.to(room).emit("notification", `${userName} joined the room.`);
     io.to(room).emit("user-list", rooms[room]);
+  });
+
+  socket.on("get-room-users", (room) => {
+    socket.emit("room-users", rooms[room] || []);
   });
 
   socket.on("send-message", ({ room, message }) => {
@@ -51,26 +55,47 @@ io.on("connection", (socket) => {
       timestamp,
       replyTo: message.replyTo || null,
     });
+
+    if (typingStatus[socket.id]) {
+      delete typingStatus[socket.id];
+      io.to(room).emit("typing", typingStatus[room] || []);
+    }
   });
 
   socket.on("react-message", ({ room, messageId, reaction }) => {
     io.to(room).emit("message-reaction", { messageId, reaction });
   });
 
-  socket.on("edit-message", ({ room, messageId, newText }) => {
-    io.to(room).emit("update-message", { messageId, newText });
-  });
+  socket.on("typing", ({ room }) => {
+    const userName = users[socket.id]?.userName;
+    if (!userName) return;
 
-  socket.on("delete-message", ({ room, messageId }) => {
-    io.to(room).emit("remove-message", { messageId });
+    if (!typingStatus[room]) typingStatus[room] = new Set();
+    if (!typingStatus[room].has(userName)) {
+      typingStatus[room].add(userName);
+      io.to(room).emit("typing", Array.from(typingStatus[room]));
+
+      setTimeout(() => {
+        if (typingStatus[room]) {
+          typingStatus[room].delete(userName);
+          io.to(room).emit("typing", Array.from(typingStatus[room]));
+        }
+      }, 2000);
+    }
   });
 
   socket.on("disconnect", () => {
     const { userName, room } = users[socket.id] || {};
+
     if (room) {
       rooms[room] = rooms[room].filter((user) => user.id !== socket.id);
       io.to(room).emit("notification", `${userName} left the room.`);
       io.to(room).emit("user-list", rooms[room]);
+
+      if (typingStatus[room]) {
+        typingStatus[room].delete(userName);
+        io.to(room).emit("typing", Array.from(typingStatus[room]));
+      }
     }
 
     delete users[socket.id];
