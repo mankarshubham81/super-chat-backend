@@ -27,16 +27,21 @@ const users = {}; // Store users by socket ID
 const rooms = {}; // Store users in each room
 const typingStatus = {}; // Store typing users by room
 
+function ensureRoomExists(room) {
+  if (!rooms[room]) rooms[room] = [];
+}
+
 io.on("connection", (socket) => {
   console.log("A user connected:", socket.id);
 
   socket.on("join-room", ({ room, userName }) => {
-    users[socket.id] = { userName, room };
+    ensureRoomExists(room);
 
-    if (!rooms[room]) rooms[room] = [];
+    users[socket.id] = { userName, room };
     rooms[room].push({ id: socket.id, userName });
 
     socket.join(room);
+    socket.emit("join-success", { room, userName });
     io.to(room).emit("notification", `${userName} joined the room.`);
     io.to(room).emit("user-list", rooms[room]);
   });
@@ -56,9 +61,9 @@ io.on("connection", (socket) => {
       replyTo: message.replyTo || null,
     });
 
-    if (typingStatus[socket.id]) {
-      delete typingStatus[socket.id];
-      io.to(room).emit("typing", typingStatus[room] || []);
+    if (typingStatus[room]?.has(users[socket.id]?.userName)) {
+      typingStatus[room].delete(users[socket.id].userName);
+      io.to(room).emit("typing", Array.from(typingStatus[room]));
     }
   });
 
@@ -71,17 +76,15 @@ io.on("connection", (socket) => {
     if (!userName) return;
 
     if (!typingStatus[room]) typingStatus[room] = new Set();
-    if (!typingStatus[room].has(userName)) {
-      typingStatus[room].add(userName);
-      io.to(room).emit("typing", Array.from(typingStatus[room]));
+    typingStatus[room].add(userName);
+    io.to(room).emit("typing", Array.from(typingStatus[room]));
 
-      setTimeout(() => {
-        if (typingStatus[room]) {
-          typingStatus[room].delete(userName);
-          io.to(room).emit("typing", Array.from(typingStatus[room]));
-        }
-      }, 2000);
-    }
+    setTimeout(() => {
+      if (typingStatus[room]) {
+        typingStatus[room].delete(userName);
+        io.to(room).emit("typing", Array.from(typingStatus[room]));
+      }
+    }, 2000);
   });
 
   socket.on("disconnect", () => {
@@ -92,7 +95,7 @@ io.on("connection", (socket) => {
       io.to(room).emit("notification", `${userName} left the room.`);
       io.to(room).emit("user-list", rooms[room]);
 
-      if (typingStatus[room]) {
+      if (typingStatus[room]?.has(userName)) {
         typingStatus[room].delete(userName);
         io.to(room).emit("typing", Array.from(typingStatus[room]));
       }
