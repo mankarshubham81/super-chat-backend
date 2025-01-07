@@ -2,17 +2,10 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
+const redis = require("redis");
 require("dotenv").config();
 
 const app = express();
-app.use(
-  cors({
-    origin: process.env.CLIENT_URL,
-    methods: ["GET", "POST"],
-    credentials: true,
-  })
-);
-
 const server = http.createServer(app);
 
 const io = new Server(server, {
@@ -23,67 +16,95 @@ const io = new Server(server, {
   transports: ["websocket", "polling"],
 });
 
-const users = {}; // Store users by socket ID
-const rooms = {}; // Store users in each room
-const typingStatus = {}; // Store typing users by room
 
-function ensureRoomExists(room) {
-  if (!rooms[room]) rooms[room] = [];
+// Redis configuration
+const redisClient = redis.createClient({
+  username: "default",
+  password: process.env.REDIS_PASSWORD,
+  socket: {
+    host: process.env.REDIS_HOST,
+    port: parseInt(process.env.REDIS_PORT),
+  },
+});
+
+redisClient.connect().catch((err) => console.error("Redis Connection Error:", err));
+
+redisClient.on("error", (err) => console.error("Redis Client Error:", err));
+redisClient.on("connect", () => console.log("Connected to Redis"));
+
+// Utility to save messages to Redis
+async function saveMessage(room, message) {
+  try {
+    const key = `room:${room}:messages`;
+    await redisClient.rPush(key, JSON.stringify(message));
+    await redisClient.expire(key, 24 * 60 * 60); // Messages expire in 1 day
+  } catch (err) {
+    console.error("Error saving message to Redis:", err);
+  }
 }
+
+// Utility to fetch recent messages
+async function getRecentMessages(room) {
+  try {
+    const key = `room:${room}:messages`;
+    const messages = await redisClient.lRange(key, 0, -1);
+    return messages.map((msg) => JSON.parse(msg));
+  } catch (err) {
+    console.error("Error fetching messages from Redis:", err);
+    return [];
+  }
+}
+
+const users = {};
+const rooms = {};
 
 io.on("connection", (socket) => {
   console.log("A user connected:", socket.id);
 
-  socket.on("join-room", ({ room, userName }) => {
-    ensureRoomExists(room);
-
+  socket.on("join-room", async ({ room, userName }) => {
+    // Track user and room details
+    if (!rooms[room]) rooms[room] = [];
     users[socket.id] = { userName, room };
     rooms[room].push({ id: socket.id, userName });
 
     socket.join(room);
-    socket.emit("join-success", { room, userName });
+
+    // Fetch and send recent messages to the new user
+    const recentMessages = await getRecentMessages(room);
+    socket.emit("recent-messages", recentMessages);
+
+    // Notify the room about the new user and update the user list
     io.to(room).emit("notification", `${userName} joined the room.`);
     io.to(room).emit("user-list", rooms[room]);
   });
 
-  socket.on("get-room-users", (room) => {
-    socket.emit("room-users", rooms[room] || []);
-  });
-
-  socket.on("send-message", ({ room, message }) => {
+  socket.on("send-message", async ({ room, message }) => {
     const timestamp = new Date().toISOString();
     const messageId = `${socket.id}-${Date.now()}`;
-    io.to(room).emit("receive-message", {
+    const fullMessage = {
       id: messageId,
       sender: users[socket.id]?.userName,
       text: message.text,
       timestamp,
       replyTo: message.replyTo || null,
-    });
+    };
 
-    if (typingStatus[room]?.has(users[socket.id]?.userName)) {
-      typingStatus[room].delete(users[socket.id].userName);
-      io.to(room).emit("typing", Array.from(typingStatus[room]));
-    }
-  });
+    // Save the message in Redis
+    await saveMessage(room, fullMessage);
 
-  socket.on("react-message", ({ room, messageId, reaction }) => {
-    io.to(room).emit("message-reaction", { messageId, reaction });
+    // Broadcast the message to all users in the room
+    io.to(room).emit("receive-message", fullMessage);
   });
 
   socket.on("typing", ({ room }) => {
     const userName = users[socket.id]?.userName;
     if (!userName) return;
 
-    if (!typingStatus[room]) typingStatus[room] = new Set();
-    typingStatus[room].add(userName);
-    io.to(room).emit("typing", Array.from(typingStatus[room]));
+    socket.to(room).emit("typing", [userName]);
 
+    // Remove typing status after a delay
     setTimeout(() => {
-      if (typingStatus[room]) {
-        typingStatus[room].delete(userName);
-        io.to(room).emit("typing", Array.from(typingStatus[room]));
-      }
+      socket.to(room).emit("typing", []);
     }, 2000);
   });
 
@@ -94,11 +115,6 @@ io.on("connection", (socket) => {
       rooms[room] = rooms[room].filter((user) => user.id !== socket.id);
       io.to(room).emit("notification", `${userName} left the room.`);
       io.to(room).emit("user-list", rooms[room]);
-
-      if (typingStatus[room]?.has(userName)) {
-        typingStatus[room].delete(userName);
-        io.to(room).emit("typing", Array.from(typingStatus[room]));
-      }
     }
 
     delete users[socket.id];
