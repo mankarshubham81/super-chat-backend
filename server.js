@@ -23,9 +23,12 @@ const redisClient = redis.createClient({
   password: process.env.REDIS_PASSWORD,
   socket: {
     host: process.env.REDIS_HOST,
-    port: parseInt(process.env.REDIS_PORT),
+    port: process.env.REDIS_PORT,
   },
 });
+
+console.log("Connecting to Redis with POrt:", process.env.REDIS_URL);
+
 
 redisClient.connect().catch((err) => console.error("Redis Connection Error:", err));
 
@@ -37,7 +40,7 @@ async function saveMessage(room, message) {
   try {
     const key = `room:${room}:messages`;
     await redisClient.rPush(key, JSON.stringify(message));
-    await redisClient.expire(key, 24 * 60 * 60); // Messages expire in 1 day
+    await redisClient.expire(key, 1 * 60 * 60); // Messages expire in 1 day
   } catch (err) {
     console.error("Error saving message to Redis:", err);
   }
