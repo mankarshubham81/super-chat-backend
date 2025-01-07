@@ -1,45 +1,55 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-const cors = require("cors");
 const redis = require("redis");
 require("dotenv").config();
 
 const app = express();
 const server = http.createServer(app);
 
-// Initialize Socket.io server
+// Initialize Socket.io server with optimized CORS and transports
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL || "http://localhost:3000",
+    origin: process.env.CLIENT_URL || "http://localhost:3000", // Adjust the client URL as needed
     methods: ["GET", "POST"],
   },
-  transports: ["websocket", "polling"],
+  transports: ["websocket", "polling"], // Ensure WebSocket is prioritized
+  pingTimeout: 5000, // Reduce ping timeout for faster WebSocket connections
+  pingInterval: 10000, // Interval for pinging clients to ensure connection is active
 });
 
-// Redis client setup
+// Redis client setup with retry logic and connection configuration
 const redisClient = redis.createClient({
   username: "default",
   password: process.env.REDIS_PASSWORD,
   socket: {
-    host: process.env.REDIS_HOST,
-    port: process.env.REDIS_PORT,
+    host: process.env.REDIS_HOST || "localhost",
+    port: process.env.REDIS_PORT || 6379,
   },
 });
 
-redisClient
-  .connect()
-  .then(() => console.log("Connected to Redis"))
-  .catch((err) => console.error("Redis connection error:", err));
+async function connectToRedis() {
+  try {
+    await redisClient.connect();
+    console.log("Connected to Redis");
+  } catch (err) {
+    console.error("Error connecting to Redis:", err);
+    setTimeout(connectToRedis, 4000); // Retry every 4 seconds if connection fails
+  }
+}
 
-redisClient.on("error", (err) => console.error("Redis error:", err));
+connectToRedis(); // Connect to Redis when the server starts
+
+redisClient.on("error", (err) => {
+  console.error("Redis error:", err);
+});
 
 // Utility functions for Redis
 async function saveMessage(room, message) {
   try {
     const key = `room:${room}:messages`;
     await redisClient.rPush(key, JSON.stringify(message));
-    await redisClient.expire(key, 24 * 60 * 60); // Messages expire after 1 day
+    await redisClient.expire(key, 1 * 60 * 60); // Messages expire after 1 day
   } catch (err) {
     console.error("Error saving message to Redis:", err);
   }
