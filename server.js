@@ -34,7 +34,7 @@ async function connectToRedis() {
     console.log("Connected to Redis");
   } catch (err) {
     console.error("Error connecting to Redis:", err);
-    setTimeout(connectToRedis, 4000); // Retry every 4 seconds if connection fails
+    setTimeout(connectToRedis, 2000); // Retry every 2 seconds if connection fails
   }
 }
 
@@ -116,6 +116,35 @@ io.on("connection", (socket) => {
       console.error("Error in send-message handler:", err);
     }
   });
+
+  socket.on(
+    "message-reaction",
+    ({
+      messageId,
+      reaction,
+      remove,
+    }: {
+      messageId: string;
+      reaction: string;
+      remove: boolean;
+    }) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId
+            ? {
+                ...msg,
+                reactions: {
+                  ...msg.reactions,
+                  [reaction]: remove
+                    ? Math.max(0, (msg.reactions?.[reaction] || 1) - 1) // Decrease count on removal
+                    : (msg.reactions?.[reaction] || 0) + 1, // Increase count on addition
+                },
+              }
+            : msg
+        )
+      );
+    }
+  );
 
   // Handle user typing
   socket.on("typing", ({ room }) => {
