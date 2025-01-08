@@ -117,34 +117,9 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on(
-    "message-reaction",
-    ({
-      messageId,
-      reaction,
-      remove,
-    }: {
-      messageId: string;
-      reaction: string;
-      remove: boolean;
-    }) => {
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === messageId
-            ? {
-                ...msg,
-                reactions: {
-                  ...msg.reactions,
-                  [reaction]: remove
-                    ? Math.max(0, (msg.reactions?.[reaction] || 1) - 1) // Decrease count on removal
-                    : (msg.reactions?.[reaction] || 0) + 1, // Increase count on addition
-                },
-              }
-            : msg
-        )
-      );
-    }
-  );
+  socket.on("react-message", ({ room, messageId, reaction }) => {
+    io.to(room).emit("message-reaction", { messageId, reaction });
+  });
 
   // Handle user typing
   socket.on("typing", ({ room }) => {
