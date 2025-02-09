@@ -107,10 +107,11 @@ io.on("connection", (socket) => {
         text: message.text,
         timestamp,
         replyTo: message.replyTo || null,
+        imageUrl: message.imageUrl || null,
       };
-
-      // Save the message and broadcast it
+  
       await saveMessage(room, fullMessage);
+      // Broadcast to all room participants including sender
       io.to(room).emit("receive-message", fullMessage);
     } catch (err) {
       console.error("Error in send-message handler:", err);
