@@ -108,6 +108,7 @@ io.on("connection", (socket) => {
         timestamp,
         replyTo: message.replyTo || null,
         imageUrl: message.imageUrl || null,
+        videoUrl: message.videoUrl || null,
       };
   
       await saveMessage(room, fullMessage);
